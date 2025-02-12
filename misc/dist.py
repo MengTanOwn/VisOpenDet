@@ -1,11 +1,3 @@
-"""
-reference
-- https://github.com/pytorch/vision/blob/main/references/detection/utils.py
-- https://github.com/facebookresearch/detr/blob/master/util/misc.py#L406
-
-by lyuwenyu
-"""
-
 import random
 import numpy as np 
 

@@ -1,6 +1,4 @@
-"""by lyuwenyu
-"""
-from .tide import *
+from .VisOpenDet import *
 from .encoder import *
 from .decoder import *
 from .criterion import *

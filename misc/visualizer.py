@@ -1,11 +1,6 @@
-""""by lyuwenyu
-"""
-
 import torch
 import torch.utils.data
 
-import torchvision
-#torchvision.disable_beta_transforms_warning()
 
 import PIL 
 

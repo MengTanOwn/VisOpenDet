@@ -1,6 +1,3 @@
-"""by lyuwenyu
-"""
-
 import torch 
 
 from .utils import inverse_sigmoid

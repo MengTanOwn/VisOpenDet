@@ -1,30 +1,24 @@
-"""by lyuwenyu
-"""
-
+import numpy as np 
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
+
 from .utils import NestedTensor
 from.positional_encoding import PositionEmbeddingSineHW
-import random 
-import numpy as np 
 
-class TIDE(nn.Module):
-    def __init__(self, backbone: nn.Module, encoder, decoder, multi_scale=None,l2_norm=False,version='v2',backbone_num_channels=[512, 1024, 2048],num_feature_levels=4,freeze_encoder = False):
+
+class VisOpenDet(nn.Module):
+    def __init__(self, backbone: nn.Module, encoder, decoder, multi_scale=None,l2_norm=False,backbone_num_channels=[512, 1024, 2048],num_feature_levels=4,freeze_encoder = False):
         super().__init__()
         self.backbone = backbone
         self.decoder = decoder
         self.encoder = encoder
         self.multi_scale = multi_scale
         self.l2_norm = l2_norm
-        self.version = version
         self.backbone_num_channels = backbone_num_channels[4-num_feature_levels:]
         self.num_feature_levels = num_feature_levels
         self.freeze_encoder = freeze_encoder
-        self.hidden_dim = 256
-        if self.version == 'v1':
-            self.input_proj = self.__build_input_proj__()
-            self.pos_emb = self.build_position_encoding()
+        self.hidden_dim = 256 
         if self.freeze_encoder:
             for p in self.encoder.parameters():
                 p.requires_grad = False        
@@ -48,44 +42,8 @@ class TIDE(nn.Module):
             else:
                 x = self.backbone(x)
         x = [feat.permute(0, 3, 1, 2).contiguous() for feat in x]
-        if self.version == 'v1':
-            query_pos = []
-            x_temp = []
-            if self.num_feature_levels == 3:
-                x = x[1:]
-            elif self.num_feature_levels == 2:
-                x = [x[self.num_feature_levels]]
-            for feat in x:
-                feat_mask = F.interpolate(x_mask[None].float(), size=feat.shape[-2:]).to(torch.bool)[0]
-                feat = NestedTensor(feat, feat_mask)
-                query_pos.append(self.pos_emb(feat))
-                x_temp.append(feat)
-            x = x_temp
-            
-            x, x_mask, query_pos = self.extend_featlayer(x, query_pos)
-            x_flatten,x_mask_flatten,prompt_dict,spatial_shapes,valid_ratios,lvl_pos_embed_flatten = self.encoder(x,query_pos,x_mask,y.transpose(1,2),y_mask)#flatten
-            level_start_index = None
-            x = self.decoder(
-                            x_flatten,
-                            x_mask_flatten,
-                            prompt_dict,
-                            spatial_shapes,
-                            level_start_index,
-                            valid_ratios,
-                            lvl_pos_embed_flatten,
-                        )
-        else:
-            if y!=None:
-                x,prompt_dict = self.encoder(x,y.transpose(1,2),x_mask,y_mask,text_features,cross_vp=cross_vp)        
-                x = self.decoder(x,prompt_dict,targets)
-            elif vp!=None:
-                if extract_feature_mode:
-                    x,prompt_dict = self.encoder(x,vp=vp,query_mask=x_mask)
-                    return prompt_dict
-                else:
-                    x,prompt_dict = self.encoder(x,vp=vp,query_mask=x_mask)
-                    x = self.decoder(x,prompt_dict,targets)
-            
+        x,prompt_dict = self.encoder(x,vp=vp,query_mask=x_mask)
+        x = self.decoder(x,prompt_dict,targets)    
         return x
     
     def deploy(self,):

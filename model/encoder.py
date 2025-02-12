@@ -1,21 +1,14 @@
-'''by 
-'''
-
 import copy
+import torchvision
 import torch 
 from torch import Tensor
 import torch.nn as nn 
 import torch.nn.functional as F 
-from .BMHA import BiAttentionBlock
-from .decoder import MSDeformableAttention as MSDeformAttn 
-from .prompt_encoder import PositionEmbeddingRandom,PositionEmbeddingSine
-from .utils import get_activation,_get_clones,get_sine_pos_embed,_get_activation_fn
-import random
-import torchvision
-from functools import reduce
 
-def merge_dicts_reduce(list_of_dicts):
-    return reduce(lambda a, b: {**a, **b}, list_of_dicts)
+from .decoder import MSDeformableAttention as MSDeformAttn 
+from .prompt_encoder import PositionEmbeddingRandom
+from .utils import get_activation
+
 
 class ConvNormLayer(nn.Module):
     def __init__(self, ch_in, ch_out, kernel_size, stride, padding=None, bias=False, act=None):
@@ -197,78 +190,44 @@ class HybridEncoder(nn.Module):
                  expansion=1.0,
                  depth_mult=1.0,
                  act='silu',
-                 BMHA=False,
-                 num_fusion_layers = 2,
-                 use_mask_head = False,
                  eval_spatial_size=None,
-                 use_text = False,
-                 use_visual_prompt = False,
                  max_support_len = 100,
                  ):
         super().__init__()
         self.max_support_len = max_support_len
         self.max_len_support_box = max_support_len
         self.in_channels = in_channels
-        self.use_text = use_text
         self.feat_strides = feat_strides
         self.hidden_dim = hidden_dim
         self.use_encoder_idx = use_encoder_idx
         self.num_encoder_layers = num_encoder_layers
         self.pe_temperature = pe_temperature
         self.eval_spatial_size = eval_spatial_size
-        self.BMHA = BMHA
-        self.use_mask_head = use_mask_head
-        # if use_visual_prompt:
-        #     self.pe_layer = PositionEmbeddingRandom(hidden_dim // 2)
-        #     self.num_point_embeddings: int = 4  # pos/neg point + 2 box corners
-        #     point_embeddings = [nn.Embedding(1, hidden_dim) for i in range(self.num_point_embeddings)]
-        #     self.point_embeddings = nn.ModuleList(point_embeddings)
-        if use_visual_prompt:
-            self.pe_layer = PositionEmbeddingRandom(hidden_dim // 2)
-            
-            self.num_point_embeddings: int = 4  # pos/neg point + 2 box corners
-            point_embeddings = [nn.Embedding(1, hidden_dim) for i in range(self.num_point_embeddings)]
-            self.point_embeddings = nn.ModuleList(point_embeddings)
-            self.content_embedding = nn.Embedding(1, hidden_dim)
+        
+        self.pe_layer = PositionEmbeddingRandom(hidden_dim // 2)
+        self.num_point_embeddings: int = 4  # pos/neg point + 2 box corners
+        point_embeddings = [nn.Embedding(1, hidden_dim) for i in range(self.num_point_embeddings)]
+        self.point_embeddings = nn.ModuleList(point_embeddings)
+        self.content_embedding = nn.Embedding(1, hidden_dim)
 
-            self.cls_token = nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
-            self.cls_token_ref_point = nn.Parameter(torch.zeros(1,1,4))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
+        self.cls_token_ref_point = nn.Parameter(torch.zeros(1,1,4))
 
-            self.use_visual_prompt = use_visual_prompt
-            
-            # self.cross_attention_vp = nn.MultiheadAttention(hidden_dim, nhead, dropout=dropout)
-            self.cross_attention_vp = MSDeformAttn(hidden_dim, nhead, 3, 4)
-            self.cross_attention_vp_dropout = (
-                nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-            )
-            self.cross_attention_vp_norm = nn.LayerNorm(hidden_dim)
-            self.self_attn = nn.MultiheadAttention(hidden_dim, nhead, dropout=dropout,batch_first=True)
-            self.dropout_post = nn.Dropout(dropout)
-            self.norm_post = nn.LayerNorm(hidden_dim)
-        if self.BMHA:
-            self.fusion_layers = nn.ModuleList()
-            for _ in range(num_fusion_layers):
-                self.fusion_layers.append(
-                    copy.deepcopy(BiAttentionBlock(
-                    v_dim=hidden_dim,
-                    l_dim=hidden_dim,
-                    embed_dim=dim_feedforward // 2,
-                    num_heads=nhead // 2,
-                    dropout=dropout,
-            ))
+        self.cross_attention_vp = MSDeformAttn(hidden_dim, nhead, 3, 4)
+        self.cross_attention_vp_dropout = (
+            nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         )
-
-
-
+        self.cross_attention_vp_norm = nn.LayerNorm(hidden_dim)
+        self.self_attn = nn.MultiheadAttention(hidden_dim, nhead, dropout=dropout,batch_first=True)
+        self.dropout_post = nn.Dropout(dropout)
+        self.norm_post = nn.LayerNorm(hidden_dim)
+        
         self.out_channels = [hidden_dim for _ in range(len(in_channels))]
         self.out_strides = feat_strides
 
-        self.gap = nn.AdaptiveAvgPool2d((1, 1))  # 适应性全局平均池化
-        # self.fc = nn.Linear(in_channels[-1], hidden_dim)
-        self.fc = nn.Linear(hidden_dim, hidden_dim)
+        self.gap = nn.AdaptiveAvgPool2d((1, 1)) 
+        self.fc = nn.Linear(in_channels[0], hidden_dim)
         self.gap_act = nn.GELU()
-        
-        # channel projection
         self.input_proj = nn.ModuleList()
         for in_channel in in_channels:
             self.input_proj.append(
@@ -278,9 +237,6 @@ class HybridEncoder(nn.Module):
                 )
             )
         self.support_input_proj = nn.Linear(raw_support_feat_dim, hidden_dim)
-        # self.text_input_proj = nn.Linear(512, hidden_dim)
-
-        # encoder transformer
         encoder_layer = TransformerEncoderLayer(
             hidden_dim, 
             nhead=nhead,
@@ -316,16 +272,6 @@ class HybridEncoder(nn.Module):
 
     def with_pos_embed(self, tensor, pos):
         return tensor if pos is None else tensor + pos
-    def _embed_boxes(self, boxes: torch.Tensor,input_image_size) -> torch.Tensor:
-        """Embeds box prompts."""
-        boxes = boxes + 0.5  # Shift to center of pixel
-        coords = boxes.reshape(-1, 2, 2)
-        corner_embedding = self.pe_layer.forward_with_coords(coords,input_image_size)
-        corner_embedding[:, 0, :] += self.point_embeddings[2].weight
-        corner_embedding[:, 1, :] += self.point_embeddings[3].weight
-        #average the two corners
-        corner_embedding = corner_embedding.mean(dim=1)
-        return corner_embedding
     
     def _embed_boxes_add_feat(self, boxes: torch.Tensor,input_image_size,feat) -> torch.Tensor:
         """Embeds box prompts."""
@@ -347,35 +293,20 @@ class HybridEncoder(nn.Module):
                 boxes_cl_i[2] / downsampling_rate,  # x_max
                 boxes_cl_i[3] / downsampling_rate   # y_max
             ]
-            
-            # 将边界框坐标转换为 PyTorch 张量，并且添加一个 batch index（这里只有一个边界框）
-            boxes = torch.tensor([0,*box_feature_map], dtype=torch.float32).view(1, -1).to(feat.device)  # 假设 batch size 为 1
-            # boxes = boxes[None,:] # 假设 batch size 为 1
-            
-            # 特征图的 batch size
-            batch_size = 1
-
-            # 定义输出特征图的大小(h,w)
-            # output_size = (max(int(box_feature_map[2]-box_feature_map[0]),1),max(int(box_feature_map[3]-box_feature_map[1]),1))  # 输出特征图的宽和高
-            output_size = (max(int(box_feature_map[3]-box_feature_map[1]),1),max(int(box_feature_map[2]-box_feature_map[0]),1))  # 输出特征图的宽和高
-
-            # 执行 RoI Align
-            
+            boxes = torch.tensor([0,*box_feature_map], dtype=torch.float32).view(1, -1).to(feat.device) 
+            output_size = (max(int(box_feature_map[3]-box_feature_map[1]),1),max(int(box_feature_map[2]-box_feature_map[0]),1)) 
             cropped_features = torchvision.ops.roi_align(feat, boxes, output_size, spatial_scale=1.0 )
-            # print(cropped_features.shape)
-            # print(torch.isnan(cropped_features).any())
             if torch.isnan(cropped_features).any():
                 continue
-            cropped_features = self.gap_act(self.gap(cropped_features))  # 应用全局平均池化
-            cropped_features = cropped_features.view(cropped_features.size(0), -1)  # 展平特征图
+            cropped_features = self.gap_act(self.gap(cropped_features))  
+            cropped_features = cropped_features.view(cropped_features.size(0), -1) 
             cropped_features = self.fc(cropped_features)  
             a = corner_embedding[box_index]   
             b = cropped_features[0]
             corner_embedding[box_index] =0.5*a+0.5*b
-            # corner_embedding[box_index] =b
-            # corner_embedding[box_index] += cropped_features[0]
 
         return corner_embedding
+    
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -438,35 +369,10 @@ class HybridEncoder(nn.Module):
 
     def forward(self, feats,support_feat=None,query_mask=None,support_mask=None,text_features=None,vp=None,cross_vp=False):
         assert len(feats) == len(self.in_channels)
-        if support_feat!=None:
-            support_feat = support_feat.type_as(feats[0])
-            if cross_vp == False:
-                support_feat = support_feat.transpose(1,2)
-                # support_feat = self.support_input_proj(support_feat) #bs num_cls 256
-            else:
-                support_feat = support_feat.transpose(1,2)
-                # support_feat = self.support_input_proj(support_feat)
-          
-            if not self.training and text_features is not None:
-                text_features.tensors[:,:,0] = torch.zeros_like(text_features.tensors[:,:,0])
-            # if self.use_text:
-            #     text_feat = self.text_input_proj(text_features.tensors.transpose(1,2).type_as(support_feat)) if text_features is not None else 0
-            #     if self.training and text_features is not None:
-            #         support_feat += text_feat if random.random() > 0.5 else 0       
-        elif vp!=None:
-            # print('$$$$$$$$$$$$vp:',[each['boxes'] for each_index,each in enumerate(vp)])
-            bs = feats[0].shape[0]
-            support_feat = torch.zeros((bs,self.max_support_len, self.hidden_dim), device=feats[0].device)
-            support_cate_feat = torch.zeros((bs,self.max_support_len, 512), device=feats[0].device)
-            
-            support_mask = torch.zeros((bs, self.max_support_len), device=feats[0].device).type_as(query_mask)    
-            support_cate_mask = torch.zeros((bs, self.max_support_len), device=feats[0].device)    
-            
-            
+        bs = feats[0].shape[0]
+        support_feat = torch.zeros((bs,self.max_support_len, self.hidden_dim), device=feats[0].device)
+        support_mask = torch.zeros((bs, self.max_support_len), device=feats[0].device).type_as(query_mask)          
         proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
-        
-        if len(proj_feats) == 1:
-            self.use_encoder_idx = [0]
         # encoder
         if self.num_encoder_layers > 0:
             for i, enc_ind in enumerate(self.use_encoder_idx):
@@ -479,12 +385,10 @@ class HybridEncoder(nn.Module):
                     pos_embed = self.build_2d_sincos_position_embedding(
                         w, h, self.hidden_dim, self.pe_temperature).to(src_flatten.device)
                 else:
-                    pos_embed = getattr(self, f'pos_embed{enc_ind}', None).to(src_flatten.device)#1,hw, 256
-                    
+                    pos_embed = getattr(self, f'pos_embed{enc_ind}', None).to(src_flatten.device)#1,hw, 256   
                 memory = self.encoder[i](src_flatten, pos_embed=pos_embed)   
                 proj_feats[enc_ind] = memory.permute(0, 2, 1).reshape(-1, self.hidden_dim, h, w).contiguous()
-                if self.use_mask_head:
-                    memory_for_mask_head =  memory.permute(0, 2, 1).reshape(-1, self.hidden_dim, h, w).contiguous()
+                
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]
         for idx in range(len(self.in_channels) - 1, 0, -1):
@@ -506,96 +410,41 @@ class HybridEncoder(nn.Module):
             out = self.pan_blocks[idx](torch.concat([downsample_feat, feat_height], dim=1))
             outs.append(out)
         
-        memory,spatial_shapes,level_start_index = self._get_features(outs)
-        if cross_vp == False:
-            box_ref = [each['boxes'] for each in vp]
-            # box_embeddings = [self._embed_boxes(each['boxes'],each['input_image_size']) for each in vp]
-            box_embeddings = [self._embed_boxes_add_feat(each['boxes'],each['input_image_size'],outs[0][each_index]) for each_index,each in enumerate(vp)]
-            # 将 box_ref 转换为张量
-            # box_ref_tensor = [torch.tensor(boxes, dtype=torch.float32,device=memory[0].device) for boxes in box_ref]
-            box_ref_tensor = [boxes.clone().detach().to(dtype=torch.float32, device=memory[0].device) for boxes in box_ref]
-            # 获取图像的宽度和高度
-            image_sizes = torch.tensor([each['input_image_size'] for each in vp], dtype=torch.float32,device=memory[0].device)
-            normalized_box_ref = []
-            for i, boxes in enumerate(box_ref_tensor):
-                img_width, img_height = image_sizes[i]
-                normalized_boxes = boxes / torch.tensor([img_width, img_height, img_width, img_height], dtype=torch.float32,device=memory[0].device)
-                normalized_box_ref.append(normalized_boxes)
-            #pad box_embeddings to the same length
-            # max_len = max([len(each['boxes'][0]) for each in vp])
+        memory,spatial_shapes,_ = self._get_features(outs)
+        
+        box_ref = [each['boxes'] for each in vp]
+        box_embeddings = [self._embed_boxes_add_feat(each['boxes'],each['input_image_size'],feats[0][each_index]) for each_index,each in enumerate(vp)]
+        box_ref_tensor = [boxes.clone().detach().to(dtype=torch.float32, device=memory[0].device) for boxes in box_ref]
+        image_sizes = torch.tensor([each['input_image_size'] for each in vp], dtype=torch.float32,device=memory[0].device)
+        normalized_box_ref = []
+        for i, boxes in enumerate(box_ref_tensor):
+            img_width, img_height = image_sizes[i]
+            normalized_boxes = boxes / torch.tensor([img_width, img_height, img_width, img_height], dtype=torch.float32,device=memory[0].device)
+            normalized_box_ref.append(normalized_boxes)
 
-            max_len = self.max_len_support_box
-            for i in range(len(box_embeddings)):
-                box_embeddings[i] = F.pad(box_embeddings[i], (0, 0, 0, max_len - len(box_embeddings[i])))
-                normalized_box_ref[i] = F.pad(normalized_box_ref[i], (0, 0, 0, max_len - len(normalized_box_ref[i][0])))
-            box_embeddings = torch.stack(box_embeddings,dim=0)
-            normalized_box_ref = torch.stack(normalized_box_ref,dim=0)
-            normalized_box_ref = normalized_box_ref[:,0]
-            corresponding_cates = [each['cates'] for each in vp]
-            cls_token_ref_point = self.cls_token_ref_point.expand(bs, -1, -1)
-
-            # corresponding_cates_tatal = [item.item() for sublist in corresponding_cates for item in sublist]
-            # unique_cates_bach =list(set(corresponding_cates_tatal))
-            # unique_catas_feat_dict = {v:[] for v in unique_cates_bach}
-            corresponding_cates_feat = [each['tag_cate_feat'] for each in vp]
-            # unique_cates_text_feat = merge_dicts_reduce(corresponding_cates_feat)
-
-            for i in range(bs):
-                unique_cates = torch.unique(corresponding_cates[i])
-                unique_cates_text_feat = corresponding_cates_feat[i]
-                for cate in unique_cates:
-                    mask = corresponding_cates[i] == cate
-                    #pad mask
-                    mask = F.pad(mask, (0, max_len - len(mask)))
-                    #support_feat[i, cate] = box_embeddings[i, mask].mean(dim=0)
-                    cur_all_class_embeddings = box_embeddings[i, mask].unsqueeze(0)
-                    if self.use_visual_prompt and vp!=None:
-                        cur_all_class_embeddings = self.support_input_proj(cur_all_class_embeddings)
-                    temp_feat = torch.cat([self.cls_token.expand(cur_all_class_embeddings.shape[0], -1, -1), cur_all_class_embeddings], dim=1)
-                    temp_feat = self.visual_prompt_cross_attention(temp_feat,memory[i].unsqueeze(0),query_mask_flatten=None,spatial_shapes=spatial_shapes,ref_points=torch.cat([cls_token_ref_point[i],normalized_box_ref[i,mask]]).unsqueeze(0).unsqueeze(2))
-                    
-                    # support_feat[i, cate] = temp_feat[:,0][0]
-                    cate_text_feat_i = unique_cates_text_feat[cate.item()].to(support_feat.device).to(torch.float32)
-                    
-                    # train stage:
-                    if torch.rand(1) > 0.5:
-                        support_feat[i, cate] = temp_feat[:,0][0]
-                    else:
-                        support_feat[i, cate] = cate_text_feat_i
-                    # eval stage:
-                    # support_feat[i, cate] = temp_feat[:,0][0] 
-                    # support_mask[i, cate] = True
-
-                    support_cate_feat[i, cate] = cate_text_feat_i
-                    support_cate_mask[i, cate] = 1
-            #         support_feat_i_cate = temp_feat[:,0][0]
-            #         unique_catas_feat_dict[cate.item()].append(support_feat_i_cate)
-            # print('unique_cates_bach',len(unique_cates_bach))
-
-            # if len(unique_cates_bach)>100:
-            #     print('batch too large,cates>100')
-            #     exit()
-            # for cate in unique_cates_bach:
-            #     # cate = cate.item()
-            #     unique_catas_feats = torch.stack(unique_catas_feat_dict[cate]).mean(dim=0)
-            #     support_feat[:, cate] = unique_catas_feats
-            #     # cate_text_feat_i = torch.tensor(unique_cates_text_feat[cate]).to(support_feat.device).to(torch.float32)
-            #     cate_text_feat_i = unique_cates_text_feat[cate].to(support_feat.device).to(torch.float32)
-            #     support_cate_feat[:, cate] = cate_text_feat_i
-            #     support_cate_mask[:, cate] = 1
+        max_len = self.max_len_support_box
+        for i in range(len(box_embeddings)):
+            box_embeddings[i] = F.pad(box_embeddings[i], (0, 0, 0, max_len - len(box_embeddings[i])))
+            normalized_box_ref[i] = F.pad(normalized_box_ref[i], (0, 0, 0, max_len - len(normalized_box_ref[i][0])))
+        box_embeddings = torch.stack(box_embeddings,dim=0)
+        normalized_box_ref = torch.stack(normalized_box_ref,dim=0)
+        normalized_box_ref = normalized_box_ref[:,0]
+        corresponding_cates = [each['cates'] for each in vp]
+        cls_token_ref_point = self.cls_token_ref_point.expand(bs, -1, -1)
+        for i in range(bs):
+            unique_cates = torch.unique(corresponding_cates[i])
+            for cate in unique_cates:
+                mask = corresponding_cates[i] == cate
+                mask = F.pad(mask, (0, max_len - len(mask)))
+                cur_all_class_embeddings = box_embeddings[i, mask].unsqueeze(0)
+                cur_all_class_embeddings = self.support_input_proj(cur_all_class_embeddings)
+                temp_feat = torch.cat([self.cls_token.expand(cur_all_class_embeddings.shape[0], -1, -1), cur_all_class_embeddings], dim=1)
+                temp_feat = self.visual_prompt_cross_attention(temp_feat,memory[i].unsqueeze(0),query_mask_flatten=None,spatial_shapes=spatial_shapes,ref_points=torch.cat([cls_token_ref_point[i],normalized_box_ref[i,mask]]).unsqueeze(0).unsqueeze(2))
+                sp_cate_feat_mem = temp_feat[:,0][0]
+                support_feat[i, cate] = sp_cate_feat_mem
             
-        if cross_vp == False:
-            # support_mask = ~support_mask
-            prompt_dict = {"encoded_support":support_feat, 
-                        "support_token_mask":support_mask,
-                        'support_cate_feat':support_cate_feat,
-                        'support_cate_mask':support_cate_mask}
-        else:
-            # support_mask = ~support_mask
-            prompt_dict = {"encoded_support":support_feat, 
+        prompt_dict = {"encoded_support":support_feat, 
                         "support_token_mask":support_mask
                         }
-        if self.use_mask_head:
-            return outs,prompt_dict,memory_for_mask_head
         return outs,prompt_dict
     

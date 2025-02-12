@@ -1,4 +1,3 @@
-
 import math 
 import copy 
 from collections import OrderedDict
@@ -11,9 +10,8 @@ import torch.nn.init as init
 from .denoising import get_contrastive_denoising_training_group
 from .utils import deformable_attention_core_func, get_activation, inverse_sigmoid,_get_activation_fn
 from .utils import bias_init_with_prob,_get_clones,get_sine_pos_embed,gen_sineembed_for_position,gen_encoder_output_proposals
-from.ContrastiveEmbed import ContrastiveEmbed
+# from.ContrastiveEmbed import ContrastiveEmbed
 from.ContrastiveEmbed import ClassEmbed
-from .segmentation import MHAttentionMap, MaskHeadSmallConv
 from torch import Tensor, nn
 from typing import List, Optional
 
@@ -268,6 +266,7 @@ class TransformerDecoder(nn.Module):
         output = tgt
         dec_out_bboxes = []
         dec_out_logits = []
+        # temp_scare = 0.07
         ref_points_detach = F.sigmoid(ref_points_unact)
         if use_mask_head:
             intermediate = []
@@ -286,14 +285,16 @@ class TransformerDecoder(nn.Module):
             inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points_detach))
 
             if self.training:
-                dec_out_logits.append(score_head[i](output,prompt_dict))
+                score_head_ms,temp_scare = score_head[i](output,prompt_dict)
+                dec_out_logits.append(score_head_ms)
                 if i == 0:
                     dec_out_bboxes.append(inter_ref_bbox)
                 else:
                     dec_out_bboxes.append(F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points)))
 
             elif i == self.eval_idx:
-                dec_out_logits.append(score_head[i](output,prompt_dict))
+                score_head_ms,temp_scare = score_head[i](output,prompt_dict)
+                dec_out_logits.append(score_head_ms)
                 dec_out_bboxes.append(inter_ref_bbox)
                 break
 
@@ -307,7 +308,7 @@ class TransformerDecoder(nn.Module):
                     [itm_refpoint.transpose(0, 1) for itm_refpoint in ref_points]
                 ],torch.stack(dec_out_bboxes), torch.stack(dec_out_logits)
 
-        return torch.stack(dec_out_bboxes), torch.stack(dec_out_logits)
+        return torch.stack(dec_out_bboxes), torch.stack(dec_out_logits),temp_scare
 
 
 
@@ -335,8 +336,6 @@ class TideTransformer(nn.Module):
                  eval_idx=-1,
                  eps=1e-2, 
                  aux_loss=True,
-                 mask_head=False,
-                 align_loss = False,
                  normalize=False,
                  ):
 
@@ -392,30 +391,17 @@ class TideTransformer(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim,)
         )
-        if normalize:
-            self.enc_score_head = ContrastiveEmbed(max_support_len=num_classes,norm=True)
-            # self.enc_score_head = ClassEmbed(lang_embed_dim=hidden_dim,embed_dim=hidden_dim)
-        else:
-            # self.enc_score_head = ClassEmbed(lang_embed_dim=hidden_dim,embed_dim=hidden_dim)
-            self.enc_score_head = ContrastiveEmbed(max_support_len=num_classes)#nn.Linear(hidden_dim, num_classes)
+        self.enc_score_head = ClassEmbed(lang_embed_dim=hidden_dim,embed_dim=hidden_dim)
+        
         #self.enc_score_head = nn.Linear(hidden_dim, num_classes)
         self.enc_bbox_head = MLP(hidden_dim, hidden_dim, 4, num_layers=3)
 
         # decoder head
         self.normal = normalize
-        if normalize:
-            self.dec_score_head = nn.ModuleList([
-                ContrastiveEmbed(max_support_len=num_classes,norm=True)
-                #nn.Linear(hidden_dim, num_classes)
+        self.dec_score_head = nn.ModuleList([
+                ClassEmbed(lang_embed_dim=hidden_dim,embed_dim=hidden_dim,return_logit_scare=True)
                 for _ in range(num_decoder_layers)
             ])
-        else:
-            self.dec_score_head = nn.ModuleList([
-                ContrastiveEmbed(max_support_len=num_classes)
-                #nn.Linear(hidden_dim, num_classes)
-                for _ in range(num_decoder_layers)
-            ])
-            self.dec_score_proj = nn.Linear(num_classes,num_classes)
 
         self.dec_bbox_head = nn.ModuleList([
             MLP(hidden_dim, hidden_dim, 4, num_layers=3)
@@ -619,7 +605,7 @@ class TideTransformer(nn.Module):
                 )
             return hs,memory_decoded,out_bboxes, out_logits
         else:
-            out_bboxes, out_logits = self.decoder(
+            out_bboxes, out_logits, temp_scare= self.decoder(
                 target,
                 init_ref_points_unact,
                 memory,
@@ -631,11 +617,7 @@ class TideTransformer(nn.Module):
                 prompt_dict=prompt_dict,
                 attn_mask=attn_mask,
                 )
-            if not self.normal:
-                out_logits = self.dec_score_proj(out_logits)
-            # out_logits = F.sigmoid(out_logits)
-        # out_bboxes = F.softplus(out_bboxes)    
-        # out_bboxes = torch.clamp(out_bboxes, min=0.0000001)# 将所有负值设为零
+
         if self.training and dn_meta is not None:
             dn_out_bboxes, out_bboxes = torch.split(out_bboxes, dn_meta['dn_num_split'], dim=2)
             dn_out_logits, out_logits = torch.split(out_logits, dn_meta['dn_num_split'], dim=2)
@@ -652,7 +634,8 @@ class TideTransformer(nn.Module):
                     'pred_boxes': out_bboxes[-1],
                     'query_image_features':query_image_features,
                     'support_image_features':support_image_features,
-                    'support_text_features':prompt_dict['support_cate_feat'],
+                    'temp_scare':temp_scare,
+                    'support_avg_feat':prompt_dict['support_avg_feat'],
                     'support_text_labels':prompt_dict['support_cate_mask']}
             except:
                 out = {'pred_logits': out_logits[-1], 

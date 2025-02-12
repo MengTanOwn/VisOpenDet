@@ -2,9 +2,6 @@ import torch
 import os
 import cv2
 def square_resize(img, dsize,value=(0,0,0)):
-    """
-    按照图片的长边扩充为方形, 再resize到指定大小
-    """
     h, w, _ = img.shape
     top, bottom, left, right = 0, 0, 0, 0
     if h > w:
@@ -34,7 +31,7 @@ def support_set_preprocess(classes,support_set_path):
     except:
         return None
 def load_weight(args,model_without_ddp):
-    checkpoint = torch.load(args.resume)#, map_location="cpu")
+    checkpoint = torch.load(args.resume, map_location="cpu")
     try:
         pretrained_dict = checkpoint.get("model") if checkpoint.get("model") is not None else checkpoint
         model_without_ddp.load_state_dict(pretrained_dict)
