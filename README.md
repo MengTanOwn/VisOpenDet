@@ -50,3 +50,4 @@ python demo.py --image_path test_images/3.jpg --pre_score 0.4
 ```
 * press "s" to save the box and input box label;
 * press "q" to quit the box prompts and do inference.
+* press "e" to quit the demo.

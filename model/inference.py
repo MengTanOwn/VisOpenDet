@@ -2,8 +2,8 @@ import warnings
 warnings.filterwarnings("error", message="To copy construct from a tensor")
 
 from model.VisOpenDet import VisOpenDet
-from encoder import HybridEncoder
-from decoder import TideTransformer
+from .encoder import HybridEncoder
+from .decoder import TideTransformer
 from config import args
 import dataset.transforms as T
 from PIL import Image
@@ -35,9 +35,7 @@ class VisInference():
                 encoder=HybridEncoder(in_channels=args.backbone_dims,
                                     raw_support_feat_dim=args.support_feat_dim,
                                     hidden_dim =args.support_feat_dim,
-                                    dim_feedforward=args.encoder_dim_feedforward,
-                                    num_fusion_layers=args.num_fusion_layers,                   
-                                    use_visual_prompt=args.use_visual_prompt,
+                                    dim_feedforward=args.encoder_dim_feedforward, 
                                     max_support_len=args.max_support_len,
                                     ),                                                                            
                 decoder=TideTransformer(num_classes=args.max_support_len,

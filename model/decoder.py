@@ -340,7 +340,7 @@ class TideTransformer(nn.Module):
                  ):
 
         super(TideTransformer, self).__init__()
-        self.use_mask_head = mask_head
+
         assert position_embed_type in ['sine', 'learned'], \
             f'ValueError: position_embed_type not supported {position_embed_type}!'
         assert len(feat_channels) <= num_levels
@@ -358,12 +358,7 @@ class TideTransformer(nn.Module):
         self.num_decoder_layers = num_decoder_layers
         self.eval_spatial_size = eval_spatial_size
         self.aux_loss = aux_loss
-        if align_loss and self.training:
-            self.use_align_loss = True
-            self.align_projection_image = nn.Linear(hidden_dim, hidden_dim//4)
-            self.align_projection_support = nn.Linear(hidden_dim, hidden_dim//4)
-        else:
-            self.use_align_loss = False
+        self.use_align_loss = False
         # backbone feature projection
         self._build_input_proj_layer(feat_channels,raw_support_feat_dim=raw_support_feat_dim)
 
@@ -589,34 +584,19 @@ class TideTransformer(nn.Module):
             self._get_decoder_input(memory, spatial_shapes, prompt_dict,denoising_class, denoising_bbox_unact)
 
         # decoder
-        if self.use_mask_head:
-            [hs,memory_decoded],out_bboxes, out_logits = self.decoder(
-                target,
-                init_ref_points_unact,
-                memory,
-                spatial_shapes,
-                level_start_index,
-                self.dec_bbox_head,
-                self.dec_score_head,
-                self.query_pos_head,
-                prompt_dict=prompt_dict,
-                attn_mask=attn_mask,
-                use_mask_head=self.use_mask_head,
-                )
-            return hs,memory_decoded,out_bboxes, out_logits
-        else:
-            out_bboxes, out_logits, temp_scare= self.decoder(
-                target,
-                init_ref_points_unact,
-                memory,
-                spatial_shapes,
-                level_start_index,
-                self.dec_bbox_head,
-                self.dec_score_head,
-                self.query_pos_head,
-                prompt_dict=prompt_dict,
-                attn_mask=attn_mask,
-                )
+        
+        out_bboxes, out_logits, temp_scare= self.decoder(
+            target,
+            init_ref_points_unact,
+            memory,
+            spatial_shapes,
+            level_start_index,
+            self.dec_bbox_head,
+            self.dec_score_head,
+            self.query_pos_head,
+            prompt_dict=prompt_dict,
+            attn_mask=attn_mask,
+            )
 
         if self.training and dn_meta is not None:
             dn_out_bboxes, out_bboxes = torch.split(out_bboxes, dn_meta['dn_num_split'], dim=2)

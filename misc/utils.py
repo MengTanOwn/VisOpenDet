@@ -40,25 +40,12 @@ def load_weight(args,model_without_ddp):
         pretrained_dict = checkpoint
         model_dict = model_without_ddp.state_dict()
         # match layer state and shape
-        if args.use_mask_head:
-            if 'tide' in list(model_dict.keys())[0]:
-                pretrained_dict = {
-                    'tide.'+k: v
-                    for k, v in pretrained_dict.items()
-                    if 'tide.'+k in model_dict and v.shape == model_dict['tide.'+k].shape
-                }
-            else:
-                pretrained_dict = {
-                k: v
-                for k, v in pretrained_dict.items()
-                if k in model_dict and v.shape == model_dict[k].shape
+        
+        pretrained_dict = {
+            k: v
+            for k, v in pretrained_dict.items()
+            if k in model_dict and v.shape == model_dict[k].shape
         }
-        else:
-            pretrained_dict = {
-                k: v
-                for k, v in pretrained_dict.items()
-                if k in model_dict and v.shape == model_dict[k].shape
-            }
         model_dict.update(pretrained_dict)
         model_without_ddp.load_state_dict(model_dict)
     return model_without_ddp

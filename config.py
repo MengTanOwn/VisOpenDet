@@ -19,13 +19,13 @@ class args:
     support_feat_dim: int = 256
     max_support_len: int = 100
     
-    resume:str = 'model_weights/visopendet_base.pth'
+    resume:str = 'model_weights/VisOpenDet1.pth'
     device: str = 'cpu'
     num_fusion_layers:int = 6
     support_norm: bool = True
     query_support_norm: bool = False 
     
-    backbone: nn.Module = create_model('swinv2_tiny_window16_256', pretrained=True, 
+    backbone: nn.Module = create_model('swinv2_tiny_window16_256', pretrained=False, 
                                        in_chans=3, features_only=True, 
                                        img_size=(1024, 1024),
                                        out_indices=(1, 2, 3))
