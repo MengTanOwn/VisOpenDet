@@ -51,3 +51,43 @@ python demo.py --image_path test_images/3.jpg --pre_score 0.4
 * press "s" to save the box and input box label;
 * press "q" to quit the box prompts and do inference.
 * press "e" to quit the demo.
+### 4. Demo examples
+based on VisOpenDet1.pth
+<div style="display: flex; justify-content: space-around;">
+    <div style="text-align: center;">
+        <img src="demo_results/1.png" width="400">
+        <br>
+        <span>fig1: interactive visual instruct promt</span>
+    </div>
+    <div style="text-align: center;">
+        <img src="demo_results/1__.png" width="400">
+        <br>
+        <span>fig2: target detect results</span>
+    </div>
+</div>
+
+<div style="display: flex; justify-content: space-around; margin-top: 20px;">
+    <div style="text-align: center;">
+        <img src="demo_results/2.png" width="400">
+        <br>
+        <span>fig3: interactive visual instruct promt</span>
+    </div>
+    <div style="text-align: center;">
+        <img src="demo_results/2__.png" width="400">
+        <br>
+        <span>fig4: target detect results</span>
+    </div>
+</div>
+
+<div style="display: flex; justify-content: space-around; margin-top: 20px;">
+    <div style="text-align: center;">
+        <img src="demo_results/3.png" width="400">
+        <br>
+        <span>fig5: interactive visual instruct promt</span>
+    </div>
+    <div style="text-align: center;">
+        <img src="demo_results/3__.png" width="400">
+        <br>
+        <span>fig6: target detect results</span>
+    </div>
+</div>
