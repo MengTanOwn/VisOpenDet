@@ -18,6 +18,7 @@ This project contains the official PyTorch implementation, pre-trained models, f
 | -------- | --------------- | ---- | ---- | ---- | ---- | --------- | ------- |
 | VisOpenDet<sup>1</sup> | O365-100K   | 49.6 | 62.8 | 56.5 | 41.1 | 51.0 / 58.6 |  [VisOpenDet1.pth/VisOpenDet1-finetune.pth] |
 | VisOpenDet<sup>2</sup> | O365 | 58.3 | 71.5 | 65.3 | 49.7 | 59.6 / 63.0 |   [VisOpenDet2.pth/VisOpenDet2-finetune.pth]  |
+| VisOpenDet<sup>3</sup> | O365 | 60.8 | 73.1 | 68.1 | 52.1 | 62.3 / 64.7 |   [VisOpenDet3.pth/VisOpenDet3-finetune.pth]  |
 
  **NOTE**: *AP<sup>mv</sup> denotes the zero-shot evaluation results on LVIS MiniVal,  AP<sup>coco</sup> denotes (zero-shot / fine-tune) evaluation results on COCO, respectively.*
 
@@ -43,6 +44,8 @@ Move downloaded Model to ./model_weights.
 |VisOpenDet1-finetune.pth|TODO|--|
 |VisOpenDet2.pth|TODO|--|
 |VisOpenDet2-finetune.pth|TODO|--|
+|VisOpenDet3.pth|TODO|--|
+|VisOpenDet3-finetune.pth|TODO|--|
 ### 3. Start Demo
 Download Model weight and move to ./model_weights
 ```bash
